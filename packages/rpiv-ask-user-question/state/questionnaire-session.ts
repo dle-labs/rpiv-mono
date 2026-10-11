@@ -1,6 +1,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { Editor, OverlayHandle, TUI } from "@earendil-works/pi-tui";
 import { COLLAPSE_KEY_OFF, formatKeySpecForDisplay } from "../config.js";
+import { type BridgeView, RPIV_KEYS } from "../herdr-bridge.js";
 import type { QuestionData, QuestionnaireResult, QuestionParams } from "../tool/types.js";
 import type { WrappingSelectItem } from "../view/components/wrapping-select.js";
 import { COLLAPSED_HINT_TEMPLATE, HINT_PART_CANCEL, KEY_PLACEHOLDER } from "../view/dialog-builder.js";
@@ -62,6 +63,7 @@ function initialState(): QuestionnaireState {
  */
 export class QuestionnaireSession {
 	private state: QuestionnaireState = initialState();
+	private bridgeEnded = false;
 
 	private readonly questions: readonly QuestionData[];
 	private readonly isMulti: boolean;
@@ -115,12 +117,17 @@ export class QuestionnaireSession {
 
 		this.component = this.assembleComponent(built, config.theme);
 		this.viewAdapter.apply(this.state);
+		this.bridgePublish?.();
 	}
 
 	private assembleComponent(built: QuestionnaireBuilt, theme: Theme): QuestionnaireSessionComponent {
 		const collapsedRender = this.buildCollapsedRender(theme);
 		return {
-			render: (width) => (this.state.collapsed ? collapsedRender(width) : built.render(width)),
+			render: (width) => {
+				const lines = this.state.collapsed ? collapsedRender(width) : built.render(width);
+				this.bridgePublish?.();
+				return lines;
+			},
 			invalidate: built.invalidate,
 			handleInput: (data) => this.dispatch(data),
 		};
@@ -163,6 +170,7 @@ export class QuestionnaireSession {
 		for (const effect of result.effects) this.runEffect(effect);
 		this.state = this.mirrorNotesDraft(this.state);
 		this.viewAdapter.apply(this.state);
+		this.bridgePublish?.();
 	}
 
 	private mirrorNotesDraft(s: QuestionnaireState): QuestionnaireState {
@@ -201,6 +209,7 @@ export class QuestionnaireSession {
 				if (this.canReopenWhileHidden) this.overlayHandle?.setHidden(effect.hidden);
 				return;
 			case "done":
+				this.bridgeEnded = true;
 				this.done(effect.result);
 				return;
 		}
@@ -210,6 +219,7 @@ export class QuestionnaireSession {
 	private openInputEditorAsync(value: string): void {
 		if (this.inputEditorOpen) return;
 		this.inputEditorOpen = true;
+		this.bridgePublish?.();
 		void this.editInput(value).then(
 			(edited) => {
 				this.inputEditorOpen = false;
@@ -232,6 +242,49 @@ export class QuestionnaireSession {
 		if (!this.state.inputMode) return;
 		this.inlineInput.handleInput(data);
 		this.viewAdapter.apply(this.state);
+		this.bridgePublish?.();
+	}
+
+	private bridgePublish?: () => void;
+	setBridgePublisher(publish: () => void): void {
+		this.bridgePublish = publish;
+	}
+
+	/** Snapshot the same state and LIVE router manager used by dispatch; never the footer. */
+	bridgeSnapshot(): BridgeView {
+		const s = this.state;
+		const runtime = this.runtime();
+		const q = this.questions[s.currentTab];
+		const actions: BridgeView["actions"] = {};
+		for (const [key, bytes] of Object.entries(RPIV_KEYS)) {
+			const action = routeKey(bytes, s, runtime);
+			actions[key] = { kind: action.kind, ...("nextIndex" in action ? { nextIndex: action.nextIndex } : {}) };
+		}
+		return {
+			mounted: !this.bridgeEnded && this.overlayHandle !== undefined,
+			focused: this.overlayHandle?.isFocused() === true,
+			hidden: this.overlayHandle?.isHidden() !== false,
+			externalEditor: this.inputEditorOpen,
+			tab: s.currentTab,
+			count: this.questions.length,
+			cursor: s.optionIndex,
+			inputMode: s.inputMode,
+			notes: s.notesVisible,
+			collapsed: s.collapsed,
+			question: q?.question ?? "",
+			header: q?.header ?? "",
+			multi: q?.multiSelect === true,
+			options:
+				q?.options.map((o) => ({
+					label: o.label,
+					description: o.description,
+					...(o.preview ? { preview: o.preview } : {}),
+				})) ?? [],
+			rows: runtime.items.map((o) => ({ kind: o.kind, label: o.label })),
+			checked: [...s.multiSelectChecked].sort((a, b) => a - b),
+			input: runtime.inputBuffer,
+			actions,
+		};
 	}
 
 	private runtime(): QuestionnaireRuntime {
@@ -269,6 +322,7 @@ export class QuestionnaireSession {
 	 */
 	setOverlayHandle(handle: OverlayHandle): void {
 		this.overlayHandle = handle;
+		this.bridgePublish?.();
 	}
 
 	/**

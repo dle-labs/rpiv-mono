@@ -1,4 +1,11 @@
-# rpiv-mono
+# DLE Labs RPIV
+
+This is the **DLE Labs fork** of [juicesharp/rpiv-mono](https://github.com/juicesharp/rpiv-mono).
+Installing this repository as a Pi package loads **only the questionnaire plugin**, with the herdr WebUI adapter. It does not enable the rest of the RPIV suite or replace RPIV Voice. See [FORK.md](./FORK.md) for installation, verification, limitations, and rollback.
+
+The upstream project documentation follows; its npm install commands install upstream packages, not this fork.
+
+## Upstream rpiv-mono
 
 [![CI](https://img.shields.io/github/actions/workflow/status/juicesharp/rpiv-mono/ci.yml?branch=main&label=CI)](https://github.com/juicesharp/rpiv-mono/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/juicesharp/rpiv-mono/branch/main/graph/badge.svg?v=2)](https://codecov.io/gh/juicesharp/rpiv-mono)

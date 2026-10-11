@@ -1,6 +1,14 @@
 {
-	"name": "rpiv-mono",
+	"name": "@dle-labs/rpiv",
 	"version": "0.0.0",
+	"description": "DLE Labs RPIV questionnaire plugin with the herdr WebUI adapter",
+	"repository": "github:dle-labs/rpiv-mono",
+	"pi": {
+		"extensions": ["./packages/rpiv-ask-user-question/index.ts"],
+		"skills": [],
+		"prompts": [],
+		"themes": []
+	},
 	"private": true,
 	"type": "module",
 	"workspaces": [

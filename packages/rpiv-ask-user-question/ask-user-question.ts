@@ -13,6 +13,7 @@ import {
 	type AskUserBlockedEventPayload,
 	type AskUserPromptEventPayload,
 } from "./events.js";
+import { createBridge } from "./herdr-bridge.js";
 // Static import is fine — rpc-fallback pulls only types + the i18n bridge,
 // none of the ~560ms TUI render graph that QuestionnaireSession lazy-loads.
 import { type DialogUI, hasDialogUI, runRpcQuestionnaire } from "./rpc-fallback.js";
@@ -192,6 +193,7 @@ function makeSessionFactory(config: {
 	canReopenWhileHidden: boolean;
 	sessionRef: SessionRef;
 	Session: SessionModule["QuestionnaireSession"];
+	bridge: ReturnType<typeof createBridge>;
 }) {
 	const { ctx, typed, itemsByTab, collapseKey, canReopenWhileHidden, sessionRef, Session } = config;
 	return (
@@ -228,6 +230,8 @@ function makeSessionFactory(config: {
 			canReopenWhileHidden,
 		});
 		sessionRef.current = session;
+		config.bridge.mount(() => session.bridgeSnapshot());
+		session.setBridgePublisher(config.bridge.publish);
 		return session.component;
 	};
 }
@@ -301,6 +305,13 @@ Use the optional \`preview\` field on options when presenting concrete artifacts
 Preview content is rendered as markdown in a monospace box. Multi-line text with newlines is supported. When any option has a preview, the UI switches to a side-by-side layout with a vertical option list on the left and preview on the right. Do not use previews for simple preference questions where labels and descriptions suffice. Note: previews are only supported for single-select questions (not multiSelect).`;
 
 export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
+	// Register once, rather than retaining a shutdown listener per questionnaire.
+	// Older Pi hosts do not return an unsubscribe function from pi.on().
+	const bridges = new Set<ReturnType<typeof createBridge>>();
+	pi.on("session_shutdown", () => {
+		for (const bridge of bridges) bridge.close();
+		bridges.clear();
+	});
 	const guidance = validateGuidanceFields(loadConfig().guidance);
 	pi.registerTool({
 		name: ASK_USER_QUESTION_TOOL_NAME,
@@ -366,6 +377,8 @@ export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
 			// otherwise collapse falls back to the visible one-line row.
 			const canReopenWhileHidden = removeOverlayInputListener !== undefined;
 
+			const bridge = createBridge(ctx.sessionManager?.getSessionFile?.(), _toolCallId);
+			bridges.add(bridge);
 			emitAskUserBlockedEvent(pi, true);
 			try {
 				emitTerminalAttention();
@@ -378,6 +391,7 @@ export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
 						canReopenWhileHidden,
 						sessionRef,
 						Session: QuestionnaireSession,
+						bridge,
 					}),
 					{
 						overlay: true,
@@ -400,6 +414,8 @@ export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
 
 				return buildQuestionnaireResponse(result, typed);
 			} finally {
+				bridge.close();
+				bridges.delete(bridge);
 				removeOverlayInputListener?.();
 				emitAskUserBlockedEvent(pi, false);
 			}
